@@ -35,11 +35,13 @@ def create_app(settings: Settings | None = None) -> APIFlask:
 
 
 def _register_blueprints(app: APIFlask) -> None:
+    from app.interface.api.admin import admin_bp
     from app.interface.api.auth import auth_bp
     from app.interface.api.health import health_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(admin_bp)
 
 
 def _register_error_handlers(app: APIFlask) -> None:

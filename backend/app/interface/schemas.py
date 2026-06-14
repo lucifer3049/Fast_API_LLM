@@ -28,6 +28,18 @@ class MessageOut(Schema):
     message = String()
 
 
+# ---- Admin: user management ----
+class CreateUserIn(Schema):
+    username = String(required=True, validate=Length(min=1, max=64))
+    password = String(required=True, validate=Length(min=8, max=256))
+    # super_admin is intentionally not creatable via the API (seed only).
+    role = Enum(Role, by_value=True, load_default=Role.USER)
+
+
+class SetActiveIn(Schema):
+    is_active = Boolean(required=True)
+
+
 # ---- User ----
 class UserOut(Schema):
     id = String()

@@ -4,7 +4,7 @@ Multi-user LLM chat web application — apiflask (backend) + Vue 3 (frontend) +
 PostgreSQL + Groq, one-command up with Docker Compose.
 
 > Build follows [PLAN.md](PLAN.md). This README grows each phase; current state:
-> **Day 2 — auth + super_admin seed** (JWT login, Argon2, idempotent seed).
+> **Day 3 — RBAC + admin/super-admin API** (permission matrix, cross-role guards).
 
 ## Quick start
 
@@ -77,6 +77,29 @@ TOKEN=$(curl -s -X POST localhost:8000/auth/login \
 curl -s localhost:8000/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
+## Authorization (RBAC)
+
+Three roles — `user` / `admin` / `super_admin` — driven by a single permission
+matrix in [domain/user.py](backend/app/domain/user.py). Views carry a
+`@require_permission(...)` gate; fine-grained, target-dependent rules live in the
+service layer (so business rules return 4xx, not 500).
+
+Admin / Super Admin API:
+
+| Method & path | Permission | admin | super_admin |
+|---|---|:---:|:---:|
+| `GET  /admin/users` | list users | ✓ | ✓ |
+| `POST /admin/users` (role=user) | create user | ✓ | ✓ |
+| `POST /admin/users` (role=admin) | create admin | ✗ | ✓ |
+| `PATCH /admin/users/{id}/active` (user) | toggle user | ✓ | ✓ |
+| `PATCH /admin/users/{id}/active` (admin) | toggle admin | ✗ | ✓ |
+| `POST /admin/users/{id}/promote` | promote user→admin | ✗ | ✓ |
+
+**Invariant I-2 — always ≥ 1 active super_admin:** guaranteed structurally.
+No API path creates, deactivates, or demotes a super_admin (they exist only via
+the seed), so the system can never reach a "no super admin" state. Any operation
+targeting a super_admin is rejected (403).
+
 ## Configuration
 
 All secrets and tunables come from environment variables (`.env`); nothing is
@@ -100,7 +123,9 @@ pytest
   health checks, Docker Compose one-command-up.
 - [x] **Day 2** — auth: Argon2 hashing, JWT (HS256), login/logout/me/change
   password, super_admin idempotent seed with fail-fast, unit tests.
-- [ ] Day 3 — RBAC + admin/super-admin API.
+- [x] **Day 3** — RBAC: central permission matrix + `@require_permission`,
+  admin/super-admin API (create/list/activate/promote), cross-role guards,
+  invariant I-2 (always >=1 active super_admin), full matrix tests.
 - [ ] Day 4 — chat persistence (mock LLM).
 - [ ] Day 5 — real Groq SSE streaming.
 - [ ] Day 6 — export, frontend admin pages, observability bonuses.

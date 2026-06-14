@@ -12,6 +12,7 @@ from flask import Flask, g
 from sqlalchemy.orm import Session
 
 from app.application.auth_service import AuthService
+from app.application.user_admin_service import UserAdminService
 from app.infrastructure.db.models import User
 from app.infrastructure.db.repositories import SqlUserRepository
 from app.infrastructure.db.session import SessionLocal
@@ -32,6 +33,10 @@ def user_repository() -> SqlUserRepository:
 
 def auth_service() -> AuthService:
     return AuthService(user_repository())
+
+
+def user_admin_service() -> UserAdminService:
+    return UserAdminService(user_repository())
 
 
 @auth.verify_token
