@@ -39,3 +39,10 @@ class ConflictError(AppError):
 class ValidationError(AppError):
     status_code = 422
     message = "Validation failed"
+
+
+class LLMError(AppError):
+    """The LLM upstream failed or returned an unusable response (bad gateway)."""
+
+    status_code = 502
+    message = "LLM provider error"

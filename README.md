@@ -4,7 +4,8 @@ Multi-user LLM chat web application — apiflask (backend) + Vue 3 (frontend) +
 PostgreSQL + Groq, one-command up with Docker Compose.
 
 > Build follows [PLAN.md](PLAN.md). This README grows each phase; current state:
-> **Day 4 — chat persistence** (session CRUD + message history, mock LLM provider).
+> **Day 5 — real Groq SSE streaming** (token-by-token assistant replies, mock
+> still available offline).
 
 ## Quick start
 
@@ -113,11 +114,23 @@ the API never reveals which session ids exist.
 | `GET    /chat/sessions` | list own sessions, most-recently-active first |
 | `GET    /chat/sessions/{id}` | load a session with its full message history |
 | `DELETE /chat/sessions/{id}` | delete own session (cascades to messages) |
-| `POST   /chat/sessions/{id}/messages` | send a message; persists the user turn, gets the assistant reply, persists it, returns both |
+| `POST   /chat/sessions/{id}/messages` | send a message; persists the user turn, gets the assistant reply, persists it, returns both (non-streaming) |
+| `POST   /chat/sessions/{id}/messages/stream` | same, but streams the assistant reply token-by-token over SSE |
 
-- **LLM provider** is abstracted behind an `LLMProvider` port. Day 4 ships a
-  deterministic **mock** (`LLM_PROVIDER=mock`) so the full flow works with no API
-  key; the real Groq adapter and SSE streaming arrive in Day 5.
+- **LLM provider** is abstracted behind an `LLMProvider` port with two
+  implementations: a deterministic offline **mock** (`LLM_PROVIDER=mock`, works
+  with no API key) and the real **Groq** adapter (`LLM_PROVIDER=groq` +
+  `GROQ_API_KEY`), an OpenAI-compatible client so swapping providers is config,
+  not code. `LLM_PROVIDER=groq` with no key **fails fast**.
+- **Streaming (SSE).** The stream endpoint persists the user turn and commits it
+  *before* opening the response (so ownership/validation errors are real
+  `404`/`422`, and the user turn survives a dropped client), then emits
+  `text/event-stream` events: a `meta` frame (persisted user message + session
+  title), repeated `token` frames (content deltas), and a terminal `done`
+  (persisted assistant message) or `error`. On an upstream failure mid-stream the
+  partial reply received so far is still persisted, so a user turn never dangles
+  without an answer (PLAN §3.5). Pass the JWT as a Bearer header. The served
+  reply concatenates the deltas to exactly what the non-streaming path returns.
 - **First message** auto-names an untitled session (truncated); the title is not
   overwritten afterwards.
 - **Ordering** does not trust the wall clock (Postgres `now()` is
@@ -132,6 +145,11 @@ SID=$(curl -s -X POST localhost:8000/chat/sessions \
 curl -s -X POST localhost:8000/chat/sessions/$SID/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"content":"Hello!"}'
+
+# Streaming variant — -N disables curl's buffering so tokens print as they arrive:
+curl -N -X POST localhost:8000/chat/sessions/$SID/messages/stream \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"content":"Tell me a short joke."}'
 ```
 
 ## Configuration
@@ -163,6 +181,9 @@ pytest
 - [x] **Day 4** — chat persistence: session CRUD, chronological message history,
   per-user ownership (404 on foreign sessions), `LLMProvider` port + mock,
   auto-title on first message; service + repository tests.
-- [ ] Day 5 — real Groq SSE streaming.
+- [x] **Day 5** — real Groq SSE streaming: `LLMProvider.stream`, Groq adapter
+  (OpenAI-compatible, fail-fast on missing key), SSE endpoint with token frames,
+  partial-persist on dropped upstream; gevent worker already configured for the
+  long-lived connections. Service, factory, and end-to-end stream tests.
 - [ ] Day 6 — export, frontend admin pages, observability bonuses.
 - [ ] Day 7 — docs, transcript redaction, demo.

@@ -122,15 +122,28 @@ class FakeChatRepository:
 
 
 class FakeLLMProvider:
-    """Deterministic in-memory LLMProvider double; records the last prompt."""
+    """Deterministic in-memory LLMProvider double; records the last prompt.
+
+    `stream` yields the reply one character at a time so tests can assert the
+    delta sequence. Set `fail_after` to raise mid-stream after that many deltas,
+    simulating a dropped upstream so the partial-persist path is exercised.
+    """
 
     def __init__(self, reply: str = "fake reply") -> None:
         self.reply = reply
         self.last_prompt: Sequence[LLMMessage] = ()
+        self.fail_after: int | None = None
 
     def complete(self, messages: Sequence[LLMMessage]) -> str:
         self.last_prompt = list(messages)
         return self.reply
+
+    def stream(self, messages: Sequence[LLMMessage]) -> Iterator[str]:
+        self.last_prompt = list(messages)
+        for i, ch in enumerate(self.reply):
+            if self.fail_after is not None and i >= self.fail_after:
+                raise RuntimeError("simulated upstream failure")
+            yield ch
 
 
 @pytest.fixture

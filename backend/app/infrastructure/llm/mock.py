@@ -7,9 +7,11 @@ user turn with a visible marker so a demo makes the mock obvious.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from app.domain.chat import LLMMessage, MessageRole
+
+_CHUNK = 8  # characters per streamed delta — enough to look incremental in a demo
 
 
 class MockLLMProvider:
@@ -21,3 +23,11 @@ class MockLLMProvider:
             "",
         )
         return f"[mock-llm] You said: {last_user}"
+
+    def stream(self, messages: Sequence[LLMMessage]) -> Iterator[str]:
+        # Slice the full reply into small deltas; concatenating them reproduces
+        # `complete` exactly (the port contract), so streamed and non-streamed
+        # paths persist identical content.
+        reply = self.complete(messages)
+        for i in range(0, len(reply), _CHUNK):
+            yield reply[i : i + _CHUNK]

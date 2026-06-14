@@ -8,7 +8,7 @@ is referenced only under TYPE_CHECKING.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from app.domain.chat import LLMMessage
@@ -55,6 +55,15 @@ class ChatRepository(Protocol):
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """Abstraction over the chat-completion backend (mock now, Groq in Day 5)."""
+    """Abstraction over the chat-completion backend (mock or Groq).
+
+    `complete` returns the whole reply at once (used for short, non-interactive
+    calls). `stream` yields the reply incrementally as content deltas, for SSE
+    token-by-token rendering (PLAN §3.5); concatenating every delta reproduces
+    what `complete` would have returned. Implementations raise on upstream
+    failure so the caller can persist the partial turn and surface an error.
+    """
 
     def complete(self, messages: Sequence[LLMMessage]) -> str: ...
+
+    def stream(self, messages: Sequence[LLMMessage]) -> Iterator[str]: ...
