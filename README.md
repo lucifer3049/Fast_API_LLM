@@ -1,80 +1,83 @@
-# LLM Chat Web App
+# LLM 聊天網頁應用
 
-Multi-user LLM chat web application — apiflask (backend) + Vue 3 (frontend) +
-PostgreSQL + Groq, one-command up with Docker Compose.
+多使用者 LLM 聊天網頁應用 —— apiflask（後端）+ Vue 3（前端）+
+PostgreSQL + Groq，透過 Docker Compose 一鍵啟動。
 
-> Build follows [PLAN.md](PLAN.md). This README grows each phase; current state:
-> **Day 6 — super-admin export + separated Vue 3 frontend** (login, streaming
-> chat, admin pages) on top of the Day 5 real Groq SSE streaming.
+> 開發依循 [PLAN.md](PLAN.md)。本 README 隨各階段持續增補；目前狀態：
+> **Day 7 —— 收斂與交付物**：文件定稿
+> （[TOOLING.md](TOOLING.md)、[REDACTION.md](REDACTION.md)）、對話紀錄
+> 遮蔽（redaction）、完整測試通過，以及乾淨的一鍵啟動驗證；建立在
+> Day 6 的 super-admin 匯出 + 獨立 Vue 3 前端與 Day 5 的真實
+> Groq SSE 串流之上。
 
-## Quick start
+## 快速開始
 
 ```bash
-# 1. Create your env file from the template and fill in secrets.
+# 1. 由範本建立你的 env 檔並填入機密值。
 cp .env.example .env
-# Generate a strong JWT secret:
+# 產生一組強度足夠的 JWT secret：
 python -c "import secrets; print(secrets.token_urlsafe(48))"
-# Set JWT_SECRET, POSTGRES_PASSWORD, SUPER_ADMIN_USERNAME/PASSWORD in .env.
+# 在 .env 設定 JWT_SECRET、POSTGRES_PASSWORD、SUPER_ADMIN_USERNAME/PASSWORD。
 
-# 2. Bring up the stack (Postgres + API). Migrations run automatically.
+# 2. 啟動整個服務（Postgres + API）。Migration 會自動執行。
 docker compose up --build
 ```
 
-Then open:
+接著開啟：
 
-- API docs (OpenAPI / Swagger UI): http://localhost:8000/docs
-- Liveness:  http://localhost:8000/health
-- Readiness (checks DB + LLM upstream): http://localhost:8000/health/ready
+- API 文件（OpenAPI / Swagger UI）：http://localhost:8000/docs
+- 存活探測（Liveness）：http://localhost:8000/health
+- 就緒探測（Readiness，檢查 DB + LLM 上游）：http://localhost:8000/health/ready
 
-## Project layout
+## 專案結構
 
 ```
-backend/                 apiflask service (Clean Architecture, PLAN §3.1)
+backend/                 apiflask 服務（Clean Architecture，PLAN §3.1）
   app/
-    domain/              pure business: Role, RBAC matrix, message roles
-    application/         use-case / service layer (added Day 2+)
-    infrastructure/      config, db (SQLAlchemy + Alembic), security, llm
+    domain/              純業務邏輯：Role、RBAC 權限矩陣、訊息角色
+    application/         use-case / service 層（Day 2+ 加入）
+    infrastructure/      config、db（SQLAlchemy + Alembic）、security、llm
     interface/           apiflask blueprints + schemas
   alembic/               migrations
-  Dockerfile            multi-stage, non-root runtime
-docker-compose.yml       db + api + frontend, one-command up
-.env.example             complete environment template (no secrets committed)
+  Dockerfile            multi-stage、以非 root 身分執行
+docker-compose.yml       db + api + frontend，一鍵啟動
+.env.example             完整環境變數範本（不提交任何機密）
 
-../vue_llm/              Vue 3 + Vite SPA (separated frontend, PLAN Day 6)
-  src/api/               fetch client, SSE stream parser, typed endpoints
-  src/stores/            Pinia: auth + chat (streaming state)
+../vue_llm/              Vue 3 + Vite SPA（獨立前端，PLAN Day 6）
+  src/api/               fetch client、SSE 串流解析器、具型別的 endpoints
+  src/stores/            Pinia：auth + chat（串流狀態）
   src/views/             Login / Chat / Admin / Account
-  Dockerfile, nginx.conf serve built SPA + reverse-proxy the API
+  Dockerfile, nginx.conf 提供建置後的 SPA，並反向代理 API
 ```
 
-## Tech choices & rationale
+## 技術選型與理由
 
-See [PLAN.md §2](PLAN.md). Summary:
+詳見 [PLAN.md §2](PLAN.md)。摘要：
 
-- **PostgreSQL** — production-grade, mature SQLAlchemy + Alembic ecosystem,
-  native JSONB; the extra service is covered by compose so one-command-up holds.
-- **Groq** — free tier, OpenAI-compatible API, native SSE streaming. Wrapped
-  behind an `LLMProvider` port so the provider can be swapped via config.
-- **JWT HS256** — single issuer / single service; HS256 + env secret is the
-  simplest sufficient choice (RS256 would be over-engineering here).
-- **Argon2id** — modern, memory-hard password hashing.
-- **Gunicorn + gevent worker** — SSE streams are long-lived I/O waits;
-  gevent keeps workers from being tied up per stream.
+- **PostgreSQL** —— production 等級、成熟的 SQLAlchemy + Alembic 生態、
+  原生 JSONB；多出來的服務由 compose 一併涵蓋，因此一鍵啟動仍然成立。
+- **Groq** —— 有免費額度、相容 OpenAI 的 API、原生 SSE 串流。包裝在
+  `LLMProvider` port 之後，因此可透過設定切換供應商。
+- **JWT HS256** —— 單一發行者 / 單一服務；HS256 + 環境變數 secret 是
+  最簡單而足夠的選擇（在此用 RS256 會是過度設計）。
+- **Argon2id** —— 現代、記憶體密集（memory-hard）的密碼雜湊。
+- **Gunicorn + gevent worker** —— SSE 串流是長時間的 I/O 等待；
+  gevent 可避免 worker 因每條串流而被佔住。
 
-## Authentication
+## 身分驗證（Authentication）
 
-- **Default admin (seed):** on first startup an idempotent seed creates the
-  `super_admin` from `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD`. If either
-  is missing the app **fails fast** rather than booting with no administrator
-  (invariant I-1). Re-running is a no-op (never rebuilds/overwrites).
-- **Login:** `POST /auth/login` with `{username, password}` returns a JWT
-  access token. Send it as `Authorization: Bearer <token>` on protected routes.
-- **Logout:** `POST /auth/logout` — JWT is stateless, so logout is client-side
-  token disposal; the endpoint exists for symmetry and audit logging.
-- **Change own password:** `POST /auth/change-password`.
-- **Passwords** are hashed with Argon2id, never stored in plaintext.
+- **預設管理員（seed）：** 首次啟動時，一個冪等（idempotent）的 seed 會由
+  `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD` 建立 `super_admin`。若兩者
+  任一缺漏，應用會**快速失敗（fail fast）**，而非在沒有管理員的情況下啟動
+  （不變式 I-1）。重複執行為 no-op（絕不重建/覆寫）。
+- **登入：** `POST /auth/login`，帶 `{username, password}`，回傳一組 JWT
+  access token。在受保護的路由上以 `Authorization: Bearer <token>` 送出。
+- **登出：** `POST /auth/logout` —— JWT 為無狀態（stateless），因此登出是
+  在客戶端丟棄 token；此 endpoint 的存在是為了對稱性與稽核記錄。
+- **變更自己的密碼：** `POST /auth/change-password`。
+- **密碼**以 Argon2id 雜湊，絕不以明文儲存。
 
-Quick demo (after `docker compose up`):
+快速示範（在 `docker compose up` 之後）：
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8000/auth/login \
@@ -84,66 +87,62 @@ TOKEN=$(curl -s -X POST localhost:8000/auth/login \
 curl -s localhost:8000/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
-## Authorization (RBAC)
+## 授權（RBAC）
 
-Three roles — `user` / `admin` / `super_admin` — driven by a single permission
-matrix in [domain/user.py](backend/app/domain/user.py). Views carry a
-`@require_permission(...)` gate; fine-grained, target-dependent rules live in the
-service layer (so business rules return 4xx, not 500).
+三種角色 —— `user` / `admin` / `super_admin` —— 由
+[domain/user.py](backend/app/domain/user.py) 中的單一權限矩陣驅動。View 上掛有
+`@require_permission(...)` 閘門；細緻、依目標而定的規則放在 service 層
+（因此業務規則回傳 4xx，而非 500）。
 
-Admin / Super Admin API:
+Admin / Super Admin API：
 
-| Method & path | Permission | admin | super_admin |
+| Method 與 path | 權限 | admin | super_admin |
 |---|---|:---:|:---:|
-| `GET  /admin/users` | list users | ✓ | ✓ |
-| `POST /admin/users` (role=user) | create user | ✓ | ✓ |
-| `POST /admin/users` (role=admin) | create admin | ✗ | ✓ |
-| `PATCH /admin/users/{id}/active` (user) | toggle user | ✓ | ✓ |
-| `PATCH /admin/users/{id}/active` (admin) | toggle admin | ✗ | ✓ |
-| `POST /admin/users/{id}/promote` | promote user→admin | ✗ | ✓ |
-| `GET  /admin/export` | export all conversations (JSON) | ✗ | ✓ |
+| `GET  /admin/users` | 列出使用者 | ✓ | ✓ |
+| `POST /admin/users` (role=user) | 建立使用者 | ✓ | ✓ |
+| `POST /admin/users` (role=admin) | 建立 admin | ✗ | ✓ |
+| `PATCH /admin/users/{id}/active` (user) | 啟用/停用 user | ✓ | ✓ |
+| `PATCH /admin/users/{id}/active` (admin) | 啟用/停用 admin | ✗ | ✓ |
+| `POST /admin/users/{id}/promote` | 將 user 升級為 admin | ✗ | ✓ |
+| `GET  /admin/export` | 匯出所有對話（JSON） | ✗ | ✓ |
 
-**Invariant I-2 — always ≥ 1 active super_admin:** guaranteed structurally.
-No API path creates, deactivates, or demotes a super_admin (they exist only via
-the seed), so the system can never reach a "no super admin" state. Any operation
-targeting a super_admin is rejected (403).
+**不變式 I-2 —— 永遠至少有 1 位 active 的 super_admin：** 由結構上保證。
+沒有任何 API 路徑會建立、停用或降級 super_admin（他們只能透過 seed 產生），
+因此系統永遠不會進入「沒有 super admin」的狀態。任何以 super_admin 為目標的
+操作都會被拒絕（403）。
 
-## Chat
+## 聊天（Chat）
 
-Each user has multiple chat sessions (ChatGPT-style). Sessions and messages are
-persisted; history loads in chronological order. Authorization here is **per-user
-ownership** — a session belonging to another user returns `404` (not `403`) so
-the API never reveals which session ids exist.
+每位使用者擁有多個聊天 session（ChatGPT 風格）。Session 與訊息會被持久化；
+歷史訊息以時間順序載入。此處的授權為**以使用者為單位的擁有權**——屬於其他
+使用者的 session 會回傳 `404`（而非 `403`），如此 API 便不會洩漏哪些
+session id 存在。
 
-| Method & path | Description |
+| Method 與 path | 說明 |
 |---|---|
-| `POST   /chat/sessions` | create a session (optional `title`) |
-| `GET    /chat/sessions` | list own sessions, most-recently-active first |
-| `GET    /chat/sessions/{id}` | load a session with its full message history |
-| `DELETE /chat/sessions/{id}` | delete own session (cascades to messages) |
-| `POST   /chat/sessions/{id}/messages` | send a message; persists the user turn, gets the assistant reply, persists it, returns both (non-streaming) |
-| `POST   /chat/sessions/{id}/messages/stream` | same, but streams the assistant reply token-by-token over SSE |
+| `POST   /chat/sessions` | 建立 session（`title` 選填） |
+| `GET    /chat/sessions` | 列出自己的 session，最近活動者在前 |
+| `GET    /chat/sessions/{id}` | 載入某個 session 及其完整訊息歷史 |
+| `DELETE /chat/sessions/{id}` | 刪除自己的 session（連帶刪除訊息） |
+| `POST   /chat/sessions/{id}/messages` | 送出一則訊息；持久化使用者回合、取得助理回覆、持久化後一併回傳（非串流） |
+| `POST   /chat/sessions/{id}/messages/stream` | 同上，但透過 SSE 逐 token 串流助理回覆 |
 
-- **LLM provider** is abstracted behind an `LLMProvider` port with two
-  implementations: a deterministic offline **mock** (`LLM_PROVIDER=mock`, works
-  with no API key) and the real **Groq** adapter (`LLM_PROVIDER=groq` +
-  `GROQ_API_KEY`), an OpenAI-compatible client so swapping providers is config,
-  not code. `LLM_PROVIDER=groq` with no key **fails fast**.
-- **Streaming (SSE).** The stream endpoint persists the user turn and commits it
-  *before* opening the response (so ownership/validation errors are real
-  `404`/`422`, and the user turn survives a dropped client), then emits
-  `text/event-stream` events: a `meta` frame (persisted user message + session
-  title), repeated `token` frames (content deltas), and a terminal `done`
-  (persisted assistant message) or `error`. On an upstream failure mid-stream the
-  partial reply received so far is still persisted, so a user turn never dangles
-  without an answer (PLAN §3.5). Pass the JWT as a Bearer header. The served
-  reply concatenates the deltas to exactly what the non-streaming path returns.
-- **First message** auto-names an untitled session (truncated); the title is not
-  overwritten afterwards.
-- **Ordering** does not trust the wall clock (Postgres `now()` is
-  transaction-time, and OS clocks can be coarse): each message is stamped
-  strictly after the last in its session, so history is deterministic without an
-  extra sequence column.
+- **LLM 供應商**抽象於 `LLMProvider` port 之後，有兩種實作：一個確定性的
+  離線 **mock**（`LLM_PROVIDER=mock`，無需 API key 即可運作），以及真實的
+  **Groq** adapter（`LLM_PROVIDER=groq` + `GROQ_API_KEY`），它是相容 OpenAI
+  的 client，因此切換供應商是改設定、而非改程式碼。`LLM_PROVIDER=groq` 但
+  沒有 key 時會**快速失敗（fail fast）**。
+- **串流（SSE）。** 串流 endpoint 會先持久化使用者回合並 commit，*之後*才開啟
+  回應（如此擁有權/驗證錯誤會是真正的 `404`/`422`，且使用者回合在客戶端斷線
+  時仍會留存），接著送出 `text/event-stream` 事件：一個 `meta` frame（已持久化
+  的使用者訊息 + session 標題）、重複的 `token` frame（內容 delta），以及最終的
+  `done`（已持久化的助理訊息）或 `error`。若串流途中上游失敗，目前已收到的部分
+  回覆仍會被持久化，因此使用者回合絕不會懸而無答（PLAN §3.5）。以 Bearer header
+  傳入 JWT。回傳的回覆把各個 delta 串接後，會與非串流路徑回傳的內容完全一致。
+- **第一則訊息**會自動為未命名的 session 取名（截斷處理）；之後標題不會被覆寫。
+- **排序**不信任系統時鐘（Postgres `now()` 是交易時間，而 OS 時鐘可能很粗糙）：
+  每則訊息的時間戳都嚴格排在同一 session 內前一則之後，因此歷史是確定性的，
+  無需額外的 sequence 欄位。
 
 ```bash
 SID=$(curl -s -X POST localhost:8000/chat/sessions \
@@ -153,68 +152,65 @@ curl -s -X POST localhost:8000/chat/sessions/$SID/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"content":"Hello!"}'
 
-# Streaming variant — -N disables curl's buffering so tokens print as they arrive:
+# 串流版本 —— -N 關閉 curl 的緩衝，使 token 一到達就印出：
 curl -N -X POST localhost:8000/chat/sessions/$SID/messages/stream \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"content":"Tell me a short joke."}'
 ```
 
-## Export (super_admin)
+## 匯出（super_admin）
 
-`GET /admin/export` returns a complete JSON snapshot of every user with their
-chat sessions and messages — for archival / migration. super_admin only (others
-get `403`). Sessions are loaded with `selectinload` so the export is one batched
-query for all messages, not one per session (off the N+1 path, PLAN §3.2).
+`GET /admin/export` 回傳一份完整的 JSON 快照，包含每位使用者及其聊天 session
+與訊息 —— 用於封存 / 遷移。僅限 super_admin（其他角色會得到 `403`）。Session
+以 `selectinload` 載入，因此整個匯出是一次批次查詢取得所有訊息，而非每個
+session 查一次（避開 N+1 路徑，PLAN §3.2）。
 
 ```bash
 curl -s localhost:8000/admin/export -H "Authorization: Bearer $TOKEN" -o export.json
 ```
 
-Shape: `{ exported_at, users: [ { id, username, role, sessions: [ { id, title,
-created_at, updated_at, messages: [ { role, content, created_at } ] } ] } ] }`.
+結構：`{ exported_at, users: [ { id, username, role, sessions: [ { id, title,
+created_at, updated_at, messages: [ { role, content, created_at } ] } ] } ] }`。
 
-## Frontend (Vue 3)
+## 前端（Vue 3）
 
-A separate Vue 3 + Vite + TypeScript + Pinia SPA lives in the sibling repo
-[`../vue_llm`](../vue_llm) (front-end/back-end split): login / logout / change
-password, multi-session chat with **token-by-token SSE streaming** and markdown
-rendering, and Bonus admin pages (user management + export).
+一個獨立的 Vue 3 + Vite + TypeScript + Pinia SPA 位於相鄰的 repo
+[`../vue_llm`](../vue_llm)（前後端分離）：登入 / 登出 / 變更密碼、
+支援**逐 token SSE 串流**與 markdown 渲染的多 session 聊天，以及 Bonus
+管理頁面（使用者管理 + 匯出）。
 
 ```bash
 cd ../vue_llm
 npm install
-npm run dev          # http://localhost:5173, proxies the API to :8000
+npm run dev          # http://localhost:5173，將 API 代理至 :8000
 ```
 
-- **API integration.** In dev the Vite proxy forwards `/auth /chat /admin
-  /health` to `:8000`, keeping the browser same-origin (no CORS friction). To
-  talk to the API directly instead, set `VITE_API_BASE=http://localhost:8000` —
-  the backend then allows that origin via **`CORS_ORIGINS`** (config below).
-- **Streaming.** `EventSource` can't send an `Authorization` header, so the SPA
-  POSTs with `fetch` and parses the `text/event-stream` body manually
-  (`src/api/chat.ts`), consuming the `meta` / `token` / `done` / `error` frames.
-- **Auth token.** The JWT is kept in `localStorage` and sent as a Bearer header;
-  a `401` clears it and bounces to `/login`. *(Trade-off: simpler than an
-  httpOnly cookie but readable by JS, so it relies on the markdown sanitiser to
-  contain XSS — see "Known limitations".)*
-- **Production / one-command-up.** `docker compose up --build` also builds the
-  frontend (`frontend` service): nginx serves the built SPA and reverse-proxies
-  the API, so the browser is same-origin and no CORS is needed. Open
-  http://localhost:5173.
+- **API 整合。** 在開發模式下，Vite proxy 會把 `/auth /chat /admin
+  /health` 轉發到 `:8000`，讓瀏覽器維持同源（避免 CORS 摩擦）。若想改為直接
+  呼叫 API，設定 `VITE_API_BASE=http://localhost:8000` —— 後端便會透過
+  **`CORS_ORIGINS`** 允許該來源（設定詳見下方）。
+- **串流。** `EventSource` 無法送出 `Authorization` header，因此 SPA 改用
+  `fetch` 以 POST 發送，並手動解析 `text/event-stream` 內容
+  （`src/api/chat.ts`），消費 `meta` / `token` / `done` / `error` frame。
+- **驗證 token。** JWT 保存在 `localStorage`，並以 Bearer header 送出；
+  收到 `401` 會清除它並導回 `/login`。*（取捨：比 httpOnly cookie 簡單，但可被
+  JS 讀取，因此仰賴 markdown 淨化器來圍堵 XSS —— 見「已知限制」。）*
+- **正式環境 / 一鍵啟動。** `docker compose up --build` 同時會建置前端
+  （`frontend` 服務）：nginx 提供建置後的 SPA 並反向代理 API，因此瀏覽器為
+  同源、無需 CORS。開啟 http://localhost:5173。
 
-## Configuration
+## 設定（Configuration）
 
-All secrets and tunables come from environment variables (`.env`); nothing is
-hardcoded. See [.env.example](.env.example) for the full list. `.env` is
-git-ignored and docker-ignored. **`CORS_ORIGINS`** (comma-separated) lists the
-origins allowed to call the API cross-origin; defaults to the Vite dev server
-(`http://localhost:5173`). Leave it empty when the SPA is served same-origin
-behind the compose nginx.
+所有機密與可調參數皆來自環境變數（`.env`）；沒有任何硬編碼。完整清單見
+[.env.example](.env.example)。`.env` 已被 git 與 docker 忽略。
+**`CORS_ORIGINS`**（以逗號分隔）列出允許跨來源呼叫 API 的來源；預設為 Vite
+開發伺服器（`http://localhost:5173`）。當 SPA 由 compose 的 nginx 以同源提供
+時，請將其留空。
 
-## Testing
+## 測試
 
-Unit tests use a fake repository (no DB) for services and in-memory SQLite for
-seed/repository tests — fast and deterministic.
+單元測試對 service 使用假的 repository（不接 DB），對 seed/repository 測試
+使用記憶體內 SQLite —— 快速且具確定性。
 
 ```bash
 cd backend
@@ -222,50 +218,63 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-## Status / roadmap
+## 狀態 / 路線圖
 
-- [x] **Day 1** — foundation: skeleton, config, DB + Alembic migration, `/docs`,
-  health checks, Docker Compose one-command-up.
-- [x] **Day 2** — auth: Argon2 hashing, JWT (HS256), login/logout/me/change
-  password, super_admin idempotent seed with fail-fast, unit tests.
-- [x] **Day 3** — RBAC: central permission matrix + `@require_permission`,
-  admin/super-admin API (create/list/activate/promote), cross-role guards,
-  invariant I-2 (always >=1 active super_admin), full matrix tests.
-- [x] **Day 4** — chat persistence: session CRUD, chronological message history,
-  per-user ownership (404 on foreign sessions), `LLMProvider` port + mock,
-  auto-title on first message; service + repository tests.
-- [x] **Day 5** — real Groq SSE streaming: `LLMProvider.stream`, Groq adapter
-  (OpenAI-compatible, fail-fast on missing key), SSE endpoint with token frames,
-  partial-persist on dropped upstream; gevent worker already configured for the
-  long-lived connections. Service, factory, and end-to-end stream tests.
-- [x] **Day 6** — super-admin export (`GET /admin/export`, N+1-safe), CORS for
-  the separated frontend, and the Vue 3 SPA (`../vue_llm`): login, streaming
-  chat with markdown, admin user-management + export pages; compose now builds
-  the frontend too. Observability bonuses: structured JSON logging with
-  request-id correlation and a DB + LLM readiness probe. Export + observability
-  tests added.
-- [ ] Day 7 — docs, transcript redaction, demo.
+- [x] **Day 1** —— 基礎：骨架、設定、DB + Alembic migration、`/docs`、
+  健康檢查、Docker Compose 一鍵啟動。
+- [x] **Day 2** —— 驗證：Argon2 雜湊、JWT（HS256）、login/logout/me/變更
+  密碼、具 fail-fast 的 super_admin 冪等 seed、單元測試。
+- [x] **Day 3** —— RBAC：集中式權限矩陣 + `@require_permission`、
+  admin/super-admin API（建立/列出/啟停用/升級）、跨角色守衛、
+  不變式 I-2（永遠 >=1 位 active super_admin）、完整矩陣測試。
+- [x] **Day 4** —— 聊天持久化：session CRUD、時間順序訊息歷史、
+  以使用者為單位的擁有權（外部 session 回 404）、`LLMProvider` port + mock、
+  第一則訊息自動命名；service + repository 測試。
+- [x] **Day 5** —— 真實 Groq SSE 串流：`LLMProvider.stream`、Groq adapter
+  （相容 OpenAI、缺 key 時 fail-fast）、帶 token frame 的 SSE endpoint、
+  上游斷線時部分持久化；gevent worker 已為長連線配置妥當。Service、factory
+  與端對端串流測試。
+- [x] **Day 6** —— super-admin 匯出（`GET /admin/export`，避開 N+1）、為
+  獨立前端設定 CORS，以及 Vue 3 SPA（`../vue_llm`）：登入、帶 markdown 的
+  串流聊天、admin 使用者管理 + 匯出頁面；compose 現在也會建置前端。
+  可觀測性 Bonus：帶 request-id 關聯的結構化 JSON 日誌，以及 DB + LLM 就緒
+  探測。新增匯出 + 可觀測性測試。
+- [x] **Day 7** —— 收斂與交付物：README 定稿，含技術理由 + 已知限制、
+  AI 工具揭露（[TOOLING.md](TOOLING.md)）與機密遮蔽說明
+  （[REDACTION.md](REDACTION.md)）、一支可稽核的對話紀錄遮蔽腳本
+  （[scripts/redact_transcripts.py](scripts/redact_transcripts.py)），
+  附 `--check` 洩漏自檢、完整測試通過（112 全綠），以及乾淨的
+  `docker compose up` 驗證。尚待完成：錄製示範影片並打包 zip。
 
-## Observability
+## 可觀測性（Observability）
 
-- **Structured logging.** Every log line is one JSON object on stdout
-  (`infrastructure/logging.py`); one access log per request carries method,
-  path, status and duration.
-- **Request-id correlation.** Each request gets an id (inbound `X-Request-ID`
-  header or a fresh uuid), stamped on every log line and echoed on the response
-  `X-Request-ID` header — so logs for one request can be grepped together and
-  traced from an upstream proxy.
-- **Readiness probe.** `GET /health/ready` verifies the DB connection and the
-  LLM upstream (mock is always ok; the Groq adapter does a token-free
-  `models.list` ping). The compose healthcheck polls liveness (`/health`) so
-  container health never flaps on an external dependency.
+- **結構化日誌。** 每一行日誌都是 stdout 上的一個 JSON 物件
+  （`infrastructure/logging.py`）；每個請求有一筆 access log，帶有 method、
+  path、status 與耗時。
+- **Request-id 關聯。** 每個請求都會取得一個 id（來自傳入的 `X-Request-ID`
+  header，或新產生的 uuid），蓋印在每一行日誌上，並在回應的 `X-Request-ID`
+  header 回送 —— 如此同一請求的日誌可被一起 grep，並可從上游 proxy 追蹤。
+- **就緒探測。** `GET /health/ready` 會驗證 DB 連線與 LLM 上游（mock 永遠
+  ok；Groq adapter 會做一次不耗 token 的 `models.list` ping）。Compose 的
+  healthcheck 輪詢存活探測（`/health`），因此容器健康狀態不會因外部相依而抖動。
 
-## Known limitations / trade-offs
+## 已知限制 / 取捨
 
-- **JWT in `localStorage`** (frontend): simpler than an httpOnly cookie and fine
-  for this single-page bearer-token flow, but readable by JS — assistant content
-  is sanitised (DOMPurify) to contain XSS. A cookie + CSRF approach would be the
-  hardening step.
-- **Export is assembled in one pass** (`selectinload`), not streamed in batches;
-  correct and N+1-safe, but for very large datasets a server-side batched/stream
-  response would bound memory. Noted in PLAN §3.2.
+- **JWT 存放於 `localStorage`**（前端）：比 httpOnly cookie 簡單，對這種
+  單頁 bearer-token 流程也夠用，但可被 JS 讀取 —— 助理內容已淨化
+  （DOMPurify）以圍堵 XSS。改用 cookie + CSRF 會是強化的下一步。
+- **匯出以單次組裝**（`selectinload`），而非分批串流；正確且避開 N+1，但對
+  極大型資料集而言，伺服器端分批/串流的回應會更能限制記憶體用量。已記於
+  PLAN §3.2。
+
+## 交付物
+
+| 項目 | 位置 |
+|------|------|
+| 原始碼 + git 歷史（乾淨、依階段切分的 commit） | 本 repo（含 `.git`） |
+| README —— 啟動、預設管理員/seed、技術理由、限制 | 本檔 |
+| 技術選型與理由 | [PLAN.md §2](PLAN.md) + 上方「技術選型」 |
+| AI 工具揭露 | [TOOLING.md](TOOLING.md) |
+| 機密遮蔽說明 + 遮蔽腳本 | [REDACTION.md](REDACTION.md)、[scripts/redact_transcripts.py](scripts/redact_transcripts.py) |
+| 遮蔽後的原始 JSONL 對話紀錄 | `./transcripts/`（最後再重新產生 —— 見 [REDACTION.md](REDACTION.md)） |
+| 示範錄影（3–5 分鐘） | 待錄製 |
