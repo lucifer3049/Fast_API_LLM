@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.domain.user import Role
 from app.infrastructure.db.models import ChatSession, Message, User
@@ -80,5 +80,16 @@ class SqlChatRepository:
             select(Message)
             .where(Message.session_id == session_id)
             .order_by(Message.created_at.asc())
+        )
+        return list(self._session.scalars(stmt).all())
+
+    def list_all_sessions_with_messages(self) -> list[ChatSession]:
+        # Super-admin export (PLAN §3.2): every session with its messages eagerly
+        # loaded via selectinload — one extra batched IN query for all messages,
+        # not one per session, so the export stays off the N+1 path.
+        stmt = (
+            select(ChatSession)
+            .options(selectinload(ChatSession.messages))
+            .order_by(ChatSession.user_id, ChatSession.created_at.asc())
         )
         return list(self._session.scalars(stmt).all())

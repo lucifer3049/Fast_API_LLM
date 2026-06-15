@@ -1,6 +1,8 @@
 # ---- Web framework ----
 apiflask==2.4.0
 flask==3.1.0
+# CORS for the separated Vue frontend (front-end/back-end split, PLAN Day 6)
+flask-cors==5.0.0
 
 # ---- WSGI server (SSE-friendly via gevent) ----
 gunicorn==23.0.0

@@ -86,3 +86,30 @@ class SendMessageIn(Schema):
 class SendMessageOut(Schema):
     user_message = Nested(ChatMessageOut)
     assistant_message = Nested(ChatMessageOut)
+
+
+# ---- Super-admin export ----
+class ExportMessageOut(Schema):
+    role = Enum(MessageRole, by_value=True)
+    content = String()
+    created_at = DateTime()
+
+
+class ExportSessionOut(Schema):
+    id = String()
+    title = String(allow_none=True)
+    created_at = DateTime()
+    updated_at = DateTime()
+    messages = Nested(ExportMessageOut, many=True)
+
+
+class ExportUserOut(Schema):
+    id = String()
+    username = String()
+    role = Enum(Role, by_value=True)
+    sessions = Nested(ExportSessionOut, many=True)
+
+
+class ExportOut(Schema):
+    exported_at = DateTime()
+    users = Nested(ExportUserOut, many=True)

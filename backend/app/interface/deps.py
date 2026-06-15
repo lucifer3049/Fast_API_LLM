@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.application.auth_service import AuthService
 from app.application.chat_service import ChatService
+from app.application.export_service import ExportService
 from app.application.user_admin_service import UserAdminService
 from app.infrastructure.config import get_settings
 from app.infrastructure.db.models import User
@@ -48,6 +49,10 @@ def chat_repository() -> SqlChatRepository:
 
 def chat_service() -> ChatService:
     return ChatService(chat_repository(), get_llm_provider(get_settings()))
+
+
+def export_service() -> ExportService:
+    return ExportService(user_repository(), chat_repository())
 
 
 @auth.verify_token

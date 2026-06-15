@@ -4,8 +4,8 @@ Multi-user LLM chat web application — apiflask (backend) + Vue 3 (frontend) +
 PostgreSQL + Groq, one-command up with Docker Compose.
 
 > Build follows [PLAN.md](PLAN.md). This README grows each phase; current state:
-> **Day 5 — real Groq SSE streaming** (token-by-token assistant replies, mock
-> still available offline).
+> **Day 6 — super-admin export + separated Vue 3 frontend** (login, streaming
+> chat, admin pages) on top of the Day 5 real Groq SSE streaming.
 
 ## Quick start
 
@@ -37,8 +37,14 @@ backend/                 apiflask service (Clean Architecture, PLAN §3.1)
     interface/           apiflask blueprints + schemas
   alembic/               migrations
   Dockerfile            multi-stage, non-root runtime
-docker-compose.yml       db + api (frontend added later)
+docker-compose.yml       db + api + frontend, one-command up
 .env.example             complete environment template (no secrets committed)
+
+../vue_llm/              Vue 3 + Vite SPA (separated frontend, PLAN Day 6)
+  src/api/               fetch client, SSE stream parser, typed endpoints
+  src/stores/            Pinia: auth + chat (streaming state)
+  src/views/             Login / Chat / Admin / Account
+  Dockerfile, nginx.conf serve built SPA + reverse-proxy the API
 ```
 
 ## Tech choices & rationale
@@ -95,6 +101,7 @@ Admin / Super Admin API:
 | `PATCH /admin/users/{id}/active` (user) | toggle user | ✓ | ✓ |
 | `PATCH /admin/users/{id}/active` (admin) | toggle admin | ✗ | ✓ |
 | `POST /admin/users/{id}/promote` | promote user→admin | ✗ | ✓ |
+| `GET  /admin/export` | export all conversations (JSON) | ✗ | ✓ |
 
 **Invariant I-2 — always ≥ 1 active super_admin:** guaranteed structurally.
 No API path creates, deactivates, or demotes a super_admin (they exist only via
@@ -152,11 +159,57 @@ curl -N -X POST localhost:8000/chat/sessions/$SID/messages/stream \
   -d '{"content":"Tell me a short joke."}'
 ```
 
+## Export (super_admin)
+
+`GET /admin/export` returns a complete JSON snapshot of every user with their
+chat sessions and messages — for archival / migration. super_admin only (others
+get `403`). Sessions are loaded with `selectinload` so the export is one batched
+query for all messages, not one per session (off the N+1 path, PLAN §3.2).
+
+```bash
+curl -s localhost:8000/admin/export -H "Authorization: Bearer $TOKEN" -o export.json
+```
+
+Shape: `{ exported_at, users: [ { id, username, role, sessions: [ { id, title,
+created_at, updated_at, messages: [ { role, content, created_at } ] } ] } ] }`.
+
+## Frontend (Vue 3)
+
+A separate Vue 3 + Vite + TypeScript + Pinia SPA lives in the sibling repo
+[`../vue_llm`](../vue_llm) (front-end/back-end split): login / logout / change
+password, multi-session chat with **token-by-token SSE streaming** and markdown
+rendering, and Bonus admin pages (user management + export).
+
+```bash
+cd ../vue_llm
+npm install
+npm run dev          # http://localhost:5173, proxies the API to :8000
+```
+
+- **API integration.** In dev the Vite proxy forwards `/auth /chat /admin
+  /health` to `:8000`, keeping the browser same-origin (no CORS friction). To
+  talk to the API directly instead, set `VITE_API_BASE=http://localhost:8000` —
+  the backend then allows that origin via **`CORS_ORIGINS`** (config below).
+- **Streaming.** `EventSource` can't send an `Authorization` header, so the SPA
+  POSTs with `fetch` and parses the `text/event-stream` body manually
+  (`src/api/chat.ts`), consuming the `meta` / `token` / `done` / `error` frames.
+- **Auth token.** The JWT is kept in `localStorage` and sent as a Bearer header;
+  a `401` clears it and bounces to `/login`. *(Trade-off: simpler than an
+  httpOnly cookie but readable by JS, so it relies on the markdown sanitiser to
+  contain XSS — see "Known limitations".)*
+- **Production / one-command-up.** `docker compose up --build` also builds the
+  frontend (`frontend` service): nginx serves the built SPA and reverse-proxies
+  the API, so the browser is same-origin and no CORS is needed. Open
+  http://localhost:5173.
+
 ## Configuration
 
 All secrets and tunables come from environment variables (`.env`); nothing is
 hardcoded. See [.env.example](.env.example) for the full list. `.env` is
-git-ignored and docker-ignored.
+git-ignored and docker-ignored. **`CORS_ORIGINS`** (comma-separated) lists the
+origins allowed to call the API cross-origin; defaults to the Vite dev server
+(`http://localhost:5173`). Leave it empty when the SPA is served same-origin
+behind the compose nginx.
 
 ## Testing
 
@@ -185,5 +238,21 @@ pytest
   (OpenAI-compatible, fail-fast on missing key), SSE endpoint with token frames,
   partial-persist on dropped upstream; gevent worker already configured for the
   long-lived connections. Service, factory, and end-to-end stream tests.
-- [ ] Day 6 — export, frontend admin pages, observability bonuses.
+- [x] **Day 6** — super-admin export (`GET /admin/export`, N+1-safe), CORS for
+  the separated frontend, and the Vue 3 SPA (`../vue_llm`): login, streaming
+  chat with markdown, admin user-management + export pages; compose now builds
+  the frontend too. Export endpoint tests added. *(Observability bonuses —
+  structured logging / request-id — deferred to remaining time.)*
 - [ ] Day 7 — docs, transcript redaction, demo.
+
+## Known limitations / trade-offs
+
+- **JWT in `localStorage`** (frontend): simpler than an httpOnly cookie and fine
+  for this single-page bearer-token flow, but readable by JS — assistant content
+  is sanitised (DOMPurify) to contain XSS. A cookie + CSRF approach would be the
+  hardening step.
+- **Export is assembled in one pass** (`selectinload`), not streamed in batches;
+  correct and N+1-safe, but for very large datasets a server-side batched/stream
+  response would bound memory. Noted in PLAN §3.2.
+- **Observability bonuses** (structured logging + request-id, LLM health probe)
+  are not yet wired; tracked for the remaining buffer.

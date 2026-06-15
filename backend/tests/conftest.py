@@ -120,6 +120,19 @@ class FakeChatRepository:
         msgs = [m for m in self._messages.values() if m.session_id == session_id]
         return sorted(msgs, key=lambda m: m.created_at)
 
+    def list_all_sessions_with_messages(self) -> list[ChatSession]:
+        sessions = sorted(
+            self._sessions.values(), key=lambda s: (str(s.user_id), s.created_at)
+        )
+        for s in sessions:
+            # Attach the in-memory messages onto the relationship so callers can
+            # read s.messages, mirroring the eager-loaded ORM path.
+            s.messages = sorted(
+                (m for m in self._messages.values() if m.session_id == s.id),
+                key=lambda m: m.created_at,
+            )
+        return sessions
+
 
 class FakeLLMProvider:
     """Deterministic in-memory LLMProvider double; records the last prompt.

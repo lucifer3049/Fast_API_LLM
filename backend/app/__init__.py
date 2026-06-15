@@ -25,6 +25,8 @@ def create_app(settings: Settings | None = None) -> APIFlask:
     app.config["DESCRIPTION"] = "Multi-user LLM chat web application API."
     app.config["AUTO_404_RESPONSE"] = True
 
+    _configure_cors(app, settings)
+
     from app.interface import deps
 
     deps.init_app(app)
@@ -32,6 +34,27 @@ def create_app(settings: Settings | None = None) -> APIFlask:
     _register_error_handlers(app)
 
     return app
+
+
+def _configure_cors(app: APIFlask, settings: Settings) -> None:
+    """Allow the separated Vue frontend to call the API cross-origin (PLAN Day 6).
+
+    Only the configured origins are permitted; the Authorization header is
+    allowed so the SPA can send the JWT bearer token. When the SPA is served
+    same-origin (compose nginx) no origins need be configured.
+    """
+    origins = settings.cors_origins_list
+    if not origins:
+        return
+    from flask_cors import CORS
+
+    CORS(
+        app,
+        resources={r"/*": {"origins": origins}},
+        allow_headers=["Authorization", "Content-Type"],
+        methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        supports_credentials=False,
+    )
 
 
 def _register_blueprints(app: APIFlask) -> None:

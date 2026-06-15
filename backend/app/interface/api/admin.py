@@ -11,9 +11,15 @@ import uuid
 from apiflask import APIBlueprint
 
 from app.domain.user import Permission
-from app.interface.deps import auth, current_user, get_db, user_admin_service
+from app.interface.deps import (
+    auth,
+    current_user,
+    export_service,
+    get_db,
+    user_admin_service,
+)
 from app.interface.permissions import require_permission
-from app.interface.schemas import CreateUserIn, SetActiveIn, UserOut
+from app.interface.schemas import CreateUserIn, ExportOut, SetActiveIn, UserOut
 
 admin_bp = APIBlueprint("admin", __name__, url_prefix="/admin", tag="Admin")
 
@@ -73,3 +79,16 @@ def promote(user_id: uuid.UUID):
     user = user_admin_service().promote_to_admin(current_user(), user_id)
     get_db().commit()
     return user
+
+
+@admin_bp.get("/export")
+@admin_bp.auth_required(auth)
+@admin_bp.output(ExportOut)
+@admin_bp.doc(
+    summary="Export all conversations (JSON)",
+    description="super_admin only. Returns every user with their chat sessions "
+    "and messages — a complete snapshot for archival / migration.",
+)
+@require_permission(Permission.EXPORT_ALL_CHATS)
+def export_all():
+    return export_service().export_all(current_user())

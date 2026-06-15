@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # ---- App ----
     app_env: str = "development"
     log_level: str = "INFO"
+    # Comma-separated allowed origins for the separated frontend (PLAN Day 6).
+    # In dev the Vite server runs on :5173; in compose the SPA is same-origin.
+    cors_origins: str = "http://localhost:5173"
 
     # ---- Database ----
     postgres_user: str = "chat"
@@ -62,6 +65,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Allowed origins as a list (empty string → no cross-origin allowed)."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

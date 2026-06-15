@@ -52,6 +52,8 @@ class ChatRepository(Protocol):
 
     def list_messages(self, session_id: uuid.UUID) -> "list[Message]": ...
 
+    def list_all_sessions_with_messages(self) -> "list[ChatSession]": ...
+
 
 @runtime_checkable
 class LLMProvider(Protocol):
