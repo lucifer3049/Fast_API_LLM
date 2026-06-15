@@ -31,3 +31,7 @@ class MockLLMProvider:
         reply = self.complete(messages)
         for i in range(0, len(reply), _CHUNK):
             yield reply[i : i + _CHUNK]
+
+    def health_check(self) -> None:
+        # Offline and deterministic: always available.
+        return None

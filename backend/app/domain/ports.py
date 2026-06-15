@@ -69,3 +69,11 @@ class LLMProvider(Protocol):
     def complete(self, messages: Sequence[LLMMessage]) -> str: ...
 
     def stream(self, messages: Sequence[LLMMessage]) -> Iterator[str]: ...
+
+    def health_check(self) -> None:
+        """Probe upstream reachability; raise if the provider is unavailable.
+
+        Used by the readiness endpoint (PLAN Day 6) — a lightweight check that
+        must not consume tokens or block on a full completion.
+        """
+        ...

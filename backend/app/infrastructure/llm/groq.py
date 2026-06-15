@@ -52,6 +52,13 @@ class GroqProvider:
             # The caller persists whatever was yielded before this point.
             raise LLMError(f"LLM upstream error: {exc}") from exc
 
+    def health_check(self) -> None:
+        # Cheapest auth + connectivity probe that spends no tokens: list models.
+        try:
+            self._client.models.list()
+        except OpenAIError as exc:
+            raise LLMError(f"LLM upstream error: {exc}") from exc
+
     @staticmethod
     def _to_wire(messages: Sequence[LLMMessage]) -> list[dict[str, str]]:
         return [{"role": m.role.value, "content": m.content} for m in messages]

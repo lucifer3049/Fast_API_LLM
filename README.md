@@ -24,7 +24,7 @@ Then open:
 
 - API docs (OpenAPI / Swagger UI): http://localhost:8000/docs
 - Liveness:  http://localhost:8000/health
-- Readiness (checks DB): http://localhost:8000/health/ready
+- Readiness (checks DB + LLM upstream): http://localhost:8000/health/ready
 
 ## Project layout
 
@@ -241,9 +241,24 @@ pytest
 - [x] **Day 6** — super-admin export (`GET /admin/export`, N+1-safe), CORS for
   the separated frontend, and the Vue 3 SPA (`../vue_llm`): login, streaming
   chat with markdown, admin user-management + export pages; compose now builds
-  the frontend too. Export endpoint tests added. *(Observability bonuses —
-  structured logging / request-id — deferred to remaining time.)*
+  the frontend too. Observability bonuses: structured JSON logging with
+  request-id correlation and a DB + LLM readiness probe. Export + observability
+  tests added.
 - [ ] Day 7 — docs, transcript redaction, demo.
+
+## Observability
+
+- **Structured logging.** Every log line is one JSON object on stdout
+  (`infrastructure/logging.py`); one access log per request carries method,
+  path, status and duration.
+- **Request-id correlation.** Each request gets an id (inbound `X-Request-ID`
+  header or a fresh uuid), stamped on every log line and echoed on the response
+  `X-Request-ID` header — so logs for one request can be grepped together and
+  traced from an upstream proxy.
+- **Readiness probe.** `GET /health/ready` verifies the DB connection and the
+  LLM upstream (mock is always ok; the Groq adapter does a token-free
+  `models.list` ping). The compose healthcheck polls liveness (`/health`) so
+  container health never flaps on an external dependency.
 
 ## Known limitations / trade-offs
 
@@ -254,5 +269,3 @@ pytest
 - **Export is assembled in one pass** (`selectinload`), not streamed in batches;
   correct and N+1-safe, but for very large datasets a server-side batched/stream
   response would bound memory. Noted in PLAN §3.2.
-- **Observability bonuses** (structured logging + request-id, LLM health probe)
-  are not yet wired; tracked for the remaining buffer.

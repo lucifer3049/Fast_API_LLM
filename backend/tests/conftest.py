@@ -158,6 +158,9 @@ class FakeLLMProvider:
                 raise RuntimeError("simulated upstream failure")
             yield ch
 
+    def health_check(self) -> None:
+        return None
+
 
 @pytest.fixture
 def fake_chats() -> FakeChatRepository:
